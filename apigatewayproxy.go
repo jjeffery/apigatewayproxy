@@ -7,19 +7,16 @@ package apigatewayproxy
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/golang/gddo/httputil"
 	"github.com/jjeffery/errors"
 )
 
@@ -29,20 +26,25 @@ const (
 	ctxKeyEventContext ctxKey = 1
 )
 
-var allowCompression bool
-
+// Callbacks that can be overridden. The default callbacks do nothing.
+// One useful use for these callbacks is to log the contents of the event request and response.
 var (
 	// RequestReceived is called when a request is received from Lambda
-	RequestReceived = func(request *events.APIGatewayProxyRequest) {}
+	RequestReceived func(request *events.APIGatewayProxyRequest)
 
-	// BeforeSendResponse is called prior to returning the response to Lambda
-	BeforeSendResponse = func(request *events.APIGatewayProxyRequest, response *events.APIGatewayProxyResponse) {}
+	// SendingResponse is called just prior to returning the response to Lambda
+	SendingResponse func(request *events.APIGatewayProxyRequest, response *events.APIGatewayProxyResponse)
+
+	// ShouldEncodeBody is called to determine if the body should be base64-encoded.
+	// The default implementation returns true if the response has a Content-Encoding header,
+	// or if body contains bytes outside the range [0x09, 0x7f].
+	ShouldEncodeBody func(response *events.APIGatewayProxyResponse, body []byte) bool
 )
 
 func init() {
-	if _, ok := os.LookupEnv("NO_COMPRESSION"); !ok {
-		allowCompression = true
-	}
+	RequestReceived = func(request *events.APIGatewayProxyRequest) {}
+	SendingResponse = func(request *events.APIGatewayProxyRequest, response *events.APIGatewayProxyResponse) {}
+	ShouldEncodeBody = shouldEncodeBody
 }
 
 // IsLambda returns true if the current process is operating
@@ -75,18 +77,13 @@ func apiGatewayHandler(h http.Handler) func(request events.APIGatewayProxyReques
 			return events.APIGatewayProxyResponse{}, err
 		}
 		w := responseWriter{
-			header:            make(http.Header),
-			preferredEncoding: preferredEncoding(r),
+			header: make(http.Header),
 		}
 		h.ServeHTTP(&w, r)
 		w.finished()
-		BeforeSendResponse(&request, &w.response)
+		SendingResponse(&request, &w.response)
 		return w.response, w.err
 	}
-}
-
-func preferredEncoding(r *http.Request) string {
-	return httputil.NegotiateContentEncoding(r, []string{"gzip"})
 }
 
 type emptyReader struct{}
@@ -173,71 +170,9 @@ func (w *responseWriter) WriteHeader(status int) {
 	w.headersWritten = true
 }
 
-// compressedContentTypes is a list of mime types that already
-// contain compressed content, so they should not be gzipped.
-var compressedContentTypes = []string{
-	"image/gif",
-	"image/jpeg",
-	"image/png",
-}
-
-func isCompressedContentType(contentType string) bool {
-	for _, ct := range compressedContentTypes {
-		if strings.HasPrefix(contentType, ct) {
-			return true
-		}
-	}
-	return false
-}
-
 func (w *responseWriter) finished() {
 	// write the header if it has not already been written
-	if !w.headersWritten {
-		w.WriteHeader(http.StatusOK)
-	}
-
-	// compression is easy to put here because the response content
-	// is in a buffer and we know the lengths, so it's included
-
-	var shouldCompress bool
-	if allowCompression && w.preferredEncoding == "gzip" {
-		contentEncoding := w.response.Headers["Content-Encoding"]
-		if contentEncoding == "" || contentEncoding == "identity" {
-			contentType := w.response.Headers["Content-Type"]
-			shouldCompress = !isCompressedContentType(contentType) && w.body.Len() > 256
-		}
-	}
-
-	if shouldCompress {
-		var buf bytes.Buffer
-
-		// Error handling is unusual here because if something fails during
-		// compression, we just continue with the uncompressed response.
-		// So instead of the usual "if err != nil", we have a succession of
-		// "if err == nil" tests.
-		writer, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
-		if err == nil {
-			reader := bytes.NewReader(w.body.Bytes())
-			if _, err := io.Copy(writer, reader); err == nil {
-				// don't bother if the compressed content is larger than the
-				// uncompressed content
-				if buf.Len() < w.body.Len() {
-					w.body = buf
-					w.response.Headers["Content-Encoding"] = "gzip"
-					w.response.Headers["Content-Length"] = strconv.Itoa(w.body.Len())
-					vary := w.response.Headers["Vary"]
-					if vary == "" {
-						w.response.Headers["Vary"] = "Accept-Encoding"
-					} else {
-						varyLower := strings.ToLower(vary)
-						if !strings.Contains(varyLower, "accept-encoding") && !strings.Contains(varyLower, "*") {
-							w.response.Headers["Vary"] = vary + ", Accept-Encoding"
-						}
-					}
-				}
-			}
-		}
-	}
+	w.WriteHeader(http.StatusOK)
 
 	// Regardless of the content type or the content encoding, if the body is
 	// valid UTF8, return it as a string. The call to utf8.Valid will return
@@ -247,7 +182,7 @@ func (w *responseWriter) finished() {
 	// be base64 encoded. This is the correct behaviour, because BOMs in the middle of
 	// a UTF8 string are not valid, and the body will be part of a larger, JSON string.
 	b := w.body.Bytes()
-	if shouldEncode(b) {
+	if ShouldEncodeBody(&w.response, b) {
 		w.response.Body = base64.StdEncoding.EncodeToString(b)
 		w.response.IsBase64Encoded = true
 	} else {
@@ -256,8 +191,12 @@ func (w *responseWriter) finished() {
 	}
 }
 
-func shouldEncode(buf []byte) bool {
-	for _, b := range buf {
+// shouldEncodeBody is the default implementation for ShouldEncodeBody
+func shouldEncodeBody(response *events.APIGatewayProxyResponse, body []byte) bool {
+	if contentEncoding := response.Headers["Content-Encoding"]; contentEncoding != "" && contentEncoding != "identity" {
+		return true
+	}
+	for _, b := range body {
 		switch b {
 		case '\t', '\r', '\n':
 			continue
