@@ -26,13 +26,14 @@ const (
 	ctxKeyEventContext ctxKey = 1
 )
 
-// Callbacks that can be overridden. The default callbacks do nothing.
-// One useful use for these callbacks is to log the contents of the event request and response.
+// Callback functions that can be overridden.
 var (
-	// RequestReceived is called when a request is received from Lambda
+	// RequestReceived is called when a request is received from Lambda. Useful for logging.
+	// The default implementation does nothing.
 	RequestReceived func(request *events.APIGatewayProxyRequest)
 
-	// SendingResponse is called just prior to returning the response to Lambda
+	// SendingResponse is called just prior to returning the response to Lambda. Useful for logging.
+	// The default implementation does nothing.
 	SendingResponse func(request *events.APIGatewayProxyRequest, response *events.APIGatewayProxyResponse)
 
 	// ShouldEncodeBody is called to determine if the body should be base64-encoded.
