@@ -16,7 +16,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -29,6 +28,22 @@ type ctxKey int
 const (
 	ctxKeyEventContext ctxKey = 1
 )
+
+var allowCompression bool
+
+var (
+	// RequestReceived is called when a request is received from Lambda
+	RequestReceived = func(request *events.APIGatewayProxyRequest) {}
+
+	// BeforeSendResponse is called prior to returning the response to Lambda
+	BeforeSendResponse = func(request *events.APIGatewayProxyRequest, response *events.APIGatewayProxyResponse) {}
+)
+
+func init() {
+	if _, ok := os.LookupEnv("NO_COMPRESSION"); !ok {
+		allowCompression = true
+	}
+}
 
 // IsLambda returns true if the current process is operating
 // in an AWS Lambda container. It determines this by checking
@@ -54,6 +69,7 @@ func Request(ctx context.Context) *events.APIGatewayProxyRequest {
 
 func apiGatewayHandler(h http.Handler) func(request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	return func(request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+		RequestReceived(&request)
 		r, err := newRequest(&request)
 		if err != nil {
 			return events.APIGatewayProxyResponse{}, err
@@ -64,6 +80,7 @@ func apiGatewayHandler(h http.Handler) func(request events.APIGatewayProxyReques
 		}
 		h.ServeHTTP(&w, r)
 		w.finished()
+		BeforeSendResponse(&request, &w.response)
 		return w.response, w.err
 	}
 }
@@ -183,7 +200,7 @@ func (w *responseWriter) finished() {
 	// is in a buffer and we know the lengths, so it's included
 
 	var shouldCompress bool
-	if w.preferredEncoding == "gzip" {
+	if allowCompression && w.preferredEncoding == "gzip" {
 		contentEncoding := w.response.Headers["Content-Encoding"]
 		if contentEncoding == "" || contentEncoding == "identity" {
 			contentType := w.response.Headers["Content-Type"]
@@ -230,11 +247,24 @@ func (w *responseWriter) finished() {
 	// be base64 encoded. This is the correct behaviour, because BOMs in the middle of
 	// a UTF8 string are not valid, and the body will be part of a larger, JSON string.
 	b := w.body.Bytes()
-	if utf8.Valid(b) {
-		w.response.Body = string(b)
-		w.response.IsBase64Encoded = false
-	} else {
+	if shouldEncode(b) {
 		w.response.Body = base64.StdEncoding.EncodeToString(b)
 		w.response.IsBase64Encoded = true
+	} else {
+		w.response.Body = string(b)
+		w.response.IsBase64Encoded = false
 	}
+}
+
+func shouldEncode(buf []byte) bool {
+	for _, b := range buf {
+		switch b {
+		case '\t', '\r', '\n':
+			continue
+		}
+		if b < 0x20 || b > 0x7f {
+			return true
+		}
+	}
+	return false
 }
