@@ -8,10 +8,6 @@
   version = "1.1.0"
 
 [[constraint]]
-  branch = "master"
-  name = "github.com/golang/gddo"
-
-[[constraint]]
   name = "github.com/jjeffery/errors"
   version = "1.0.1"
 

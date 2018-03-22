@@ -19,15 +19,6 @@
   version = "v1.1.0"
 
 [[projects]]
-  branch = "master"
-  name = "github.com/golang/gddo"
-  packages = [
-    "httputil",
-    "httputil/header"
-  ]
-  revision = "052378f5476869804f44ab61df2243a80ff3518f"
-
-[[projects]]
   name = "github.com/jjeffery/errors"
   packages = ["."]
   revision = "a34a51e66ce34c250486f85f1822c884f8dee966"
@@ -42,6 +33,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "76f12028528c1dbcb4385ff600ca10964770f7899b9f6cf8b0d1b45a58b8533d"
+  inputs-digest = "5e5843495e4e00984be68a44306e3f68f439657933230b36ce348359a199bcde"
   solver-name = "gps-cdcl"
   solver-version = 1
