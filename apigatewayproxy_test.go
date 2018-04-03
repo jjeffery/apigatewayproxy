@@ -163,6 +163,29 @@ func TestHandler(t *testing.T) {
 			},
 		},
 		{
+			// RequestURI set correctly from path and query
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("content-type", "text/plain")
+				w.Write([]byte("RequestURI="))
+				w.Write([]byte(r.RequestURI))
+				w.Write([]byte("\n"))
+				w.Write([]byte(r.Method))
+			}),
+			request: events.APIGatewayProxyRequest{
+				Path: "/this/is/the/path",
+				QueryStringParameters: map[string]string{
+					"q": "q1",
+				},
+			},
+			response: events.APIGatewayProxyResponse{
+				StatusCode: 200,
+				Headers: map[string]string{
+					"Content-Type": "text/plain",
+				},
+				Body: "RequestURI=/this/is/the/path?q=q1\nGET",
+			},
+		},
+		{
 			// body setup from POST
 			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				body, _ := ioutil.ReadAll(r.Body)

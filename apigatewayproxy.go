@@ -120,10 +120,13 @@ func newRequest(request *events.APIGatewayProxyRequest) (*http.Request, error) {
 		}
 	}
 
-	r, err := http.NewRequest(request.HTTPMethod, u.String(), body)
+	requestURI := u.String()
+	r, err := http.NewRequest(request.HTTPMethod, requestURI, body)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot create HTTP request")
 	}
+	// http.NewRequest does not set the RequestURI field
+	r.RequestURI = requestURI
 
 	for k, v := range request.Headers {
 		r.Header.Set(k, v)
