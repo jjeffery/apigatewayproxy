@@ -130,6 +130,9 @@ func newRequest(request *events.APIGatewayProxyRequest) (*http.Request, error) {
 
 	for k, v := range request.Headers {
 		r.Header.Set(k, v)
+		if strings.EqualFold(k, "Host") {
+			r.Host = v
+		}
 	}
 
 	// add the request event to the request context so the HTTP handler
