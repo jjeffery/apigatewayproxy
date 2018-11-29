@@ -39,7 +39,7 @@ func TestHandler(t *testing.T) {
 	tests := []struct {
 		handler     http.Handler
 		request     events.APIGatewayProxyRequest
-		response    events.APIGatewayProxyResponse
+		response    apiGatewayProxyResponse
 		expectError bool
 	}{
 		{
@@ -58,7 +58,7 @@ func TestHandler(t *testing.T) {
 				Path:       "/test",
 				HTTPMethod: "GET",
 			},
-			response: events.APIGatewayProxyResponse{
+			response: apiGatewayProxyResponse{
 				StatusCode: 200,
 				Headers:    map[string]string{},
 				Body:       "hello",
@@ -78,7 +78,7 @@ func TestHandler(t *testing.T) {
 					"Accept-Encoding": "gzip",
 				},
 			},
-			response: events.APIGatewayProxyResponse{
+			response: apiGatewayProxyResponse{
 				StatusCode: 200,
 				Headers:    map[string]string{},
 				Body:       "*/*\ngzip",
@@ -95,7 +95,7 @@ func TestHandler(t *testing.T) {
 				HTTPMethod: "GET",
 				Headers:    map[string]string{},
 			},
-			response: events.APIGatewayProxyResponse{
+			response: apiGatewayProxyResponse{
 				StatusCode: 200,
 				Headers: map[string]string{
 					"Content-Type": "application/octet-stream",
@@ -116,7 +116,7 @@ func TestHandler(t *testing.T) {
 				HTTPMethod: "GET",
 				Headers:    map[string]string{},
 			},
-			response: events.APIGatewayProxyResponse{
+			response: apiGatewayProxyResponse{
 				StatusCode: 200,
 				Headers: map[string]string{
 					"Content-Type":     "application/octet-stream",
@@ -132,7 +132,7 @@ func TestHandler(t *testing.T) {
 				w.Write([]byte("hello"))
 			}),
 			request: events.APIGatewayProxyRequest{},
-			response: events.APIGatewayProxyResponse{
+			response: apiGatewayProxyResponse{
 				StatusCode: 200,
 				Headers: map[string]string{
 					"Content-Type": "text/plain",
@@ -154,7 +154,7 @@ func TestHandler(t *testing.T) {
 					"q": "q1",
 				},
 			},
-			response: events.APIGatewayProxyResponse{
+			response: apiGatewayProxyResponse{
 				StatusCode: 200,
 				Headers: map[string]string{
 					"Content-Type": "text/plain",
@@ -177,7 +177,7 @@ func TestHandler(t *testing.T) {
 					"q": "q1",
 				},
 			},
-			response: events.APIGatewayProxyResponse{
+			response: apiGatewayProxyResponse{
 				StatusCode: 200,
 				Headers: map[string]string{
 					"Content-Type": "text/plain",
@@ -198,7 +198,7 @@ func TestHandler(t *testing.T) {
 				IsBase64Encoded: false,
 				Headers:         map[string]string{},
 			},
-			response: events.APIGatewayProxyResponse{
+			response: apiGatewayProxyResponse{
 				StatusCode: 200,
 				Headers:    map[string]string{},
 				Body:       "This is the body\n",
@@ -217,7 +217,7 @@ func TestHandler(t *testing.T) {
 				IsBase64Encoded: true,
 				Headers:         map[string]string{},
 			},
-			response: events.APIGatewayProxyResponse{
+			response: apiGatewayProxyResponse{
 				StatusCode: 200,
 				Headers:    map[string]string{},
 				Body:       "This is the body\n",

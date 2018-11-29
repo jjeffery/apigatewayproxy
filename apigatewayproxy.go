@@ -70,12 +70,12 @@ func Request(ctx context.Context) *events.APIGatewayProxyRequest {
 	return request
 }
 
-func apiGatewayHandler(h http.Handler) func(request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	return func(request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+func apiGatewayHandler(h http.Handler) func(request events.APIGatewayProxyRequest) (apiGatewayProxyResponse, error) {
+	return func(request events.APIGatewayProxyRequest) (apiGatewayProxyResponse, error) {
 		RequestReceived(&request)
 		r, err := newRequest(&request)
 		if err != nil {
-			return events.APIGatewayProxyResponse{}, err
+			return apiGatewayProxyResponse{}, err
 		}
 		w := responseWriter{
 			header: make(http.Header),
@@ -83,7 +83,7 @@ func apiGatewayHandler(h http.Handler) func(request events.APIGatewayProxyReques
 		h.ServeHTTP(&w, r)
 		w.finished()
 		SendingResponse(&request, &w.response)
-		return w.response, w.err
+		return w.response2, w.err
 	}
 }
 
@@ -143,9 +143,20 @@ func newRequest(request *events.APIGatewayProxyRequest) (*http.Request, error) {
 	return r, nil
 }
 
+// apiGatewayProxyResponse has the multi value headers, which
+// are not yet in the events.APIGatewayProxyResponse
+type apiGatewayProxyResponse struct {
+	StatusCode        int                 `json:"statusCode"`
+	Headers           map[string]string   `json:"headers"`
+	Body              string              `json:"body"`
+	IsBase64Encoded   bool                `json:"isBase64Encoded,omitempty"`
+	MultiValueHeaders map[string][]string `json:"multiValueHeaders,omitempty"`
+}
+
 type responseWriter struct {
 	preferredEncoding string
 	response          events.APIGatewayProxyResponse
+	response2         apiGatewayProxyResponse
 	body              bytes.Buffer
 	header            http.Header
 	headersWritten    bool
@@ -174,6 +185,18 @@ func (w *responseWriter) WriteHeader(status int) {
 			w.response.Headers[k] = v
 		}
 	}
+	w.response2.StatusCode = status
+	w.response2.Headers = make(map[string]string)
+	for k, vv := range w.header {
+		if len(vv) == 1 {
+			w.response2.Headers[k] = vv[0]
+		} else {
+			if w.response2.MultiValueHeaders == nil {
+				w.response2.MultiValueHeaders = make(map[string][]string)
+			}
+			w.response2.MultiValueHeaders[k] = vv
+		}
+	}
 	w.headersWritten = true
 }
 
@@ -196,6 +219,9 @@ func (w *responseWriter) finished() {
 		w.response.Body = string(b)
 		w.response.IsBase64Encoded = false
 	}
+
+	w.response2.Body = w.response.Body
+	w.response2.IsBase64Encoded = w.response.IsBase64Encoded
 }
 
 // shouldEncodeBody is the default implementation for ShouldEncodeBody
