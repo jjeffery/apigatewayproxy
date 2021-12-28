@@ -17,7 +17,7 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/jjeffery/errors"
+	"github.com/jjeffery/kv"
 )
 
 type ctxKey int
@@ -54,7 +54,8 @@ func init() {
 // variable.
 func IsLambda() bool {
 	port := os.Getenv("_LAMBDA_SERVER_PORT")
-	return port != ""
+	api := os.Getenv("AWS_LAMBDA_RUNTIME_API")
+	return port != "" || api != ""
 }
 
 // Start starts handling AWS Lambda API Gateway proxy requests by passing
@@ -96,7 +97,7 @@ func (er emptyReader) Read(b []byte) (int, error) {
 func newRequest(request *events.APIGatewayProxyRequest) (*http.Request, error) {
 	u, err := url.Parse(request.Path)
 	if err != nil {
-		return nil, errors.Wrap(err, "cannot parse request path").With("path", request.Path)
+		return nil, kv.Wrap(err, "cannot parse request path").With("path", request.Path)
 	}
 	q := u.Query()
 	for k, v := range request.QueryStringParameters {
@@ -112,7 +113,7 @@ func newRequest(request *events.APIGatewayProxyRequest) (*http.Request, error) {
 		} else if request.IsBase64Encoded {
 			b, err := base64.StdEncoding.DecodeString(request.Body)
 			if err != nil {
-				return nil, errors.Wrap(err, "cannot decode base64 body")
+				return nil, kv.Wrap(err, "cannot decode base64 body")
 			}
 			body = bytes.NewBuffer(b)
 		} else {
@@ -123,7 +124,7 @@ func newRequest(request *events.APIGatewayProxyRequest) (*http.Request, error) {
 	requestURI := u.String()
 	r, err := http.NewRequest(request.HTTPMethod, requestURI, body)
 	if err != nil {
-		return nil, errors.Wrap(err, "cannot create HTTP request")
+		return nil, kv.Wrap(err, "cannot create HTTP request")
 	}
 	// http.NewRequest does not set the RequestURI field
 	r.RequestURI = requestURI
