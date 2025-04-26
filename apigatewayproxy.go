@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -17,7 +18,6 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/jjeffery/kv"
 )
 
 type ctxKey int
@@ -71,12 +71,12 @@ func Request(ctx context.Context) *events.APIGatewayProxyRequest {
 	return request
 }
 
-func apiGatewayHandler(h http.Handler) func(request events.APIGatewayProxyRequest) (apiGatewayProxyResponse, error) {
-	return func(request events.APIGatewayProxyRequest) (apiGatewayProxyResponse, error) {
+func apiGatewayHandler(h http.Handler) func(request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	return func(request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 		RequestReceived(&request)
 		r, err := newRequest(&request)
 		if err != nil {
-			return apiGatewayProxyResponse{}, err
+			return events.APIGatewayProxyResponse{}, err
 		}
 		w := responseWriter{
 			header: make(http.Header),
@@ -84,7 +84,7 @@ func apiGatewayHandler(h http.Handler) func(request events.APIGatewayProxyReques
 		h.ServeHTTP(&w, r)
 		w.finished()
 		SendingResponse(&request, &w.response)
-		return w.response2, w.err
+		return w.response, w.err
 	}
 }
 
@@ -97,11 +97,14 @@ func (er emptyReader) Read(b []byte) (int, error) {
 func newRequest(request *events.APIGatewayProxyRequest) (*http.Request, error) {
 	u, err := url.Parse(request.Path)
 	if err != nil {
-		return nil, kv.Wrap(err, "cannot parse request path").With("path", request.Path)
+		return nil, fmt.Errorf("cannot parse request path: %w: path=%s", err, request.Path)
 	}
 	q := u.Query()
 	for k, v := range request.QueryStringParameters {
 		q.Set(k, v)
+	}
+	for k, vv := range request.MultiValueQueryStringParameters {
+		q[k] = vv
 	}
 	u.RawQuery = q.Encode()
 
@@ -113,7 +116,7 @@ func newRequest(request *events.APIGatewayProxyRequest) (*http.Request, error) {
 		} else if request.IsBase64Encoded {
 			b, err := base64.StdEncoding.DecodeString(request.Body)
 			if err != nil {
-				return nil, kv.Wrap(err, "cannot decode base64 body")
+				return nil, fmt.Errorf("cannot decode base64 body: %w", err)
 			}
 			body = bytes.NewBuffer(b)
 		} else {
@@ -124,7 +127,7 @@ func newRequest(request *events.APIGatewayProxyRequest) (*http.Request, error) {
 	requestURI := u.String()
 	r, err := http.NewRequest(request.HTTPMethod, requestURI, body)
 	if err != nil {
-		return nil, kv.Wrap(err, "cannot create HTTP request")
+		return nil, fmt.Errorf("cannot create HTTP request: %w", err)
 	}
 	// http.NewRequest does not set the RequestURI field
 	r.RequestURI = requestURI
@@ -136,6 +139,10 @@ func newRequest(request *events.APIGatewayProxyRequest) (*http.Request, error) {
 		}
 	}
 
+	for k, vv := range request.MultiValueHeaders {
+		r.Header[k] = vv
+	}
+
 	// add the request event to the request context so the HTTP handler
 	// can access it if it wants
 	ctx := context.WithValue(r.Context(), ctxKeyEventContext, request)
@@ -144,20 +151,9 @@ func newRequest(request *events.APIGatewayProxyRequest) (*http.Request, error) {
 	return r, nil
 }
 
-// apiGatewayProxyResponse has the multi value headers, which
-// are not yet in the events.APIGatewayProxyResponse
-type apiGatewayProxyResponse struct {
-	StatusCode        int                 `json:"statusCode"`
-	Headers           map[string]string   `json:"headers"`
-	Body              string              `json:"body"`
-	IsBase64Encoded   bool                `json:"isBase64Encoded,omitempty"`
-	MultiValueHeaders map[string][]string `json:"multiValueHeaders,omitempty"`
-}
-
 type responseWriter struct {
 	preferredEncoding string
 	response          events.APIGatewayProxyResponse
-	response2         apiGatewayProxyResponse
 	body              bytes.Buffer
 	header            http.Header
 	headersWritten    bool
@@ -182,20 +178,13 @@ func (w *responseWriter) WriteHeader(status int) {
 	w.response.StatusCode = status
 	w.response.Headers = make(map[string]string)
 	for k, vv := range w.header {
-		for _, v := range vv {
-			w.response.Headers[k] = v
-		}
-	}
-	w.response2.StatusCode = status
-	w.response2.Headers = make(map[string]string)
-	for k, vv := range w.header {
 		if len(vv) == 1 {
-			w.response2.Headers[k] = vv[0]
+			w.response.Headers[k] = vv[0]
 		} else {
-			if w.response2.MultiValueHeaders == nil {
-				w.response2.MultiValueHeaders = make(map[string][]string)
+			if w.response.MultiValueHeaders == nil {
+				w.response.MultiValueHeaders = make(map[string][]string)
 			}
-			w.response2.MultiValueHeaders[k] = vv
+			w.response.MultiValueHeaders[k] = vv
 		}
 	}
 	w.headersWritten = true
@@ -220,9 +209,6 @@ func (w *responseWriter) finished() {
 		w.response.Body = string(b)
 		w.response.IsBase64Encoded = false
 	}
-
-	w.response2.Body = w.response.Body
-	w.response2.IsBase64Encoded = w.response.IsBase64Encoded
 }
 
 // shouldEncodeBody is the default implementation for ShouldEncodeBody

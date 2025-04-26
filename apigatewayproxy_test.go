@@ -2,10 +2,10 @@ package apigatewayproxy
 
 import (
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -39,7 +39,7 @@ func TestHandler(t *testing.T) {
 	tests := []struct {
 		handler     http.Handler
 		request     events.APIGatewayProxyRequest
-		response    apiGatewayProxyResponse
+		response    events.APIGatewayProxyResponse
 		expectError bool
 	}{
 		{
@@ -58,7 +58,7 @@ func TestHandler(t *testing.T) {
 				Path:       "/test",
 				HTTPMethod: "GET",
 			},
-			response: apiGatewayProxyResponse{
+			response: events.APIGatewayProxyResponse{
 				StatusCode: 200,
 				Headers:    map[string]string{},
 				Body:       "hello",
@@ -78,7 +78,7 @@ func TestHandler(t *testing.T) {
 					"Accept-Encoding": "gzip",
 				},
 			},
-			response: apiGatewayProxyResponse{
+			response: events.APIGatewayProxyResponse{
 				StatusCode: 200,
 				Headers:    map[string]string{},
 				Body:       "*/*\ngzip",
@@ -95,7 +95,7 @@ func TestHandler(t *testing.T) {
 				HTTPMethod: "GET",
 				Headers:    map[string]string{},
 			},
-			response: apiGatewayProxyResponse{
+			response: events.APIGatewayProxyResponse{
 				StatusCode: 200,
 				Headers: map[string]string{
 					"Content-Type": "application/octet-stream",
@@ -116,7 +116,7 @@ func TestHandler(t *testing.T) {
 				HTTPMethod: "GET",
 				Headers:    map[string]string{},
 			},
-			response: apiGatewayProxyResponse{
+			response: events.APIGatewayProxyResponse{
 				StatusCode: 200,
 				Headers: map[string]string{
 					"Content-Type":     "application/octet-stream",
@@ -132,7 +132,7 @@ func TestHandler(t *testing.T) {
 				w.Write([]byte("hello"))
 			}),
 			request: events.APIGatewayProxyRequest{},
-			response: apiGatewayProxyResponse{
+			response: events.APIGatewayProxyResponse{
 				StatusCode: 200,
 				Headers: map[string]string{
 					"Content-Type": "text/plain",
@@ -154,7 +154,7 @@ func TestHandler(t *testing.T) {
 					"q": "q1",
 				},
 			},
-			response: apiGatewayProxyResponse{
+			response: events.APIGatewayProxyResponse{
 				StatusCode: 200,
 				Headers: map[string]string{
 					"Content-Type": "text/plain",
@@ -177,7 +177,7 @@ func TestHandler(t *testing.T) {
 					"q": "q1",
 				},
 			},
-			response: apiGatewayProxyResponse{
+			response: events.APIGatewayProxyResponse{
 				StatusCode: 200,
 				Headers: map[string]string{
 					"Content-Type": "text/plain",
@@ -188,7 +188,7 @@ func TestHandler(t *testing.T) {
 		{
 			// body setup from POST
 			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				body, _ := ioutil.ReadAll(r.Body)
+				body, _ := io.ReadAll(r.Body)
 				w.Write([]byte(body))
 			}),
 			request: events.APIGatewayProxyRequest{
@@ -198,7 +198,7 @@ func TestHandler(t *testing.T) {
 				IsBase64Encoded: false,
 				Headers:         map[string]string{},
 			},
-			response: apiGatewayProxyResponse{
+			response: events.APIGatewayProxyResponse{
 				StatusCode: 200,
 				Headers:    map[string]string{},
 				Body:       "This is the body\n",
@@ -207,7 +207,7 @@ func TestHandler(t *testing.T) {
 		{
 			// body setup from POST
 			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				body, _ := ioutil.ReadAll(r.Body)
+				body, _ := io.ReadAll(r.Body)
 				w.Write([]byte(body))
 			}),
 			request: events.APIGatewayProxyRequest{
@@ -217,10 +217,73 @@ func TestHandler(t *testing.T) {
 				IsBase64Encoded: true,
 				Headers:         map[string]string{},
 			},
-			response: apiGatewayProxyResponse{
+			response: events.APIGatewayProxyResponse{
 				StatusCode: 200,
 				Headers:    map[string]string{},
 				Body:       "This is the body\n",
+			},
+		},
+		{
+			// multiple request headers with same name
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				multi := r.Header["X-Multi"]
+				body := strings.Join(multi, ",")
+				_, _ = w.Write([]byte(body))
+			}),
+			request: events.APIGatewayProxyRequest{
+				HTTPMethod:      "POST",
+				Path:            "/test",
+				Body:            "VGhpcyBpcyB0aGUgYm9keQo=",
+				IsBase64Encoded: true,
+				Headers:         map[string]string{},
+				MultiValueHeaders: map[string][]string{
+					"X-Multi": {"a", "b", "c"},
+				},
+			},
+			response: events.APIGatewayProxyResponse{
+				StatusCode: 200,
+				Headers:    map[string]string{},
+				Body:       "a,b,c",
+			},
+		},
+		{
+			// multiple query string values with same name
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body := r.URL.RawQuery
+				_, _ = w.Write([]byte(body))
+			}),
+			request: events.APIGatewayProxyRequest{
+				HTTPMethod: "GET",
+				Path:       "/test",
+				Headers:    map[string]string{},
+				MultiValueQueryStringParameters: map[string][]string{
+					"q": {"a", "b", "c"},
+				},
+			},
+			response: events.APIGatewayProxyResponse{
+				StatusCode: 200,
+				Headers:    map[string]string{},
+				Body:       "q=a&q=b&q=c",
+			},
+		},
+		{
+			// multiple response headers with same name
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header()["X-Multi"] = []string{"a", "b", "c"}
+				body := "response"
+				_, _ = w.Write([]byte(body))
+			}),
+			request: events.APIGatewayProxyRequest{
+				HTTPMethod: "GET",
+				Path:       "/test",
+			},
+			response: events.APIGatewayProxyResponse{
+				StatusCode: 200,
+				Headers:    map[string]string{},
+				MultiValueHeaders: map[string][]string{
+					"X-Multi": {"a", "b", "c"},
+				},
+				Body: "response",
 			},
 		},
 		{
